@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "./interfaces/IPancakeRouter02.sol";
+import "./interfaces/IPancakeFactory.sol";
+
+contract TopToken {
+    string public name = "Top Token";
+    string public symbol = "TPN";
+    uint8 public decimals = 18;
+    uint256 public totalSupply = 100_000_000_000_000_000_000_000_000; // 100 trillion tokens with 18 decimal places
+
+    mapping(address => uint256) public balanceOf;
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    constructor() {
+        balanceOf[msg.sender] = totalSupply;
+    }
+
+    function transfer(address to, uint256 value) external returns (bool) {
+        require(balanceOf[msg.sender] >= value, "Insufficient balance");
+
+        balanceOf[msg.sender] -= value;
+        balanceOf[to] += value;
+        emit Transfer(msg.sender, to, value);
+        return true;
+    }
+}
+
+contract TopTokenPresale {
+    uint256 public preSaleTokenAllocation = 30_000_000_000_000_000_000_000_000; // 30 trillion tokens with 18 decimal places
+    uint256 public preSaleTokensSold;
+    bool public preSaleActive = true;
+
+    address public owner;
+    TopToken private token;
+    IPancakeRouter02 private pancakeRouter;
+    address private pancakePair;
+
+    mapping(address => bool) public preSaleWhitelist;
+
+    event TokensPurchased(address indexed purchaser, uint256 amount);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only the owner can call this function");
+        _;
+    }
+
+    constructor(address _tokenAddress, address _pancakeRouterAddress) {
+        owner = msg.sender;
+        token = TopToken(_tokenAddress);
+        pancakeRouter = IPancakeRouter02(_pancakeRouterAddress);
+        pancakePair = IPancakeFactory(pancakeRouter.factory()).createPair(address(token), pancakeRouter.WETH());
+    }
+
+    function addToPreSaleWhitelist(address participant) external onlyOwner {
+        preSaleWhitelist[participant] = true;
+    }
+
+    function buyTokens() external payable {
+        require(preSaleActive, "Pre-sale is not active");
+        require(preSaleWhitelist[msg.sender], "You are not whitelisted for the pre-sale");
+        require(preSaleTokensSold < preSaleTokenAllocation, "Pre-sale allocation is sold out");
+
+        uint256 tokensToBuy = msg.value;
+        require(tokensToBuy <= preSaleTokenAllocation - preSaleTokensSold, "Not enough tokens available for purchase");
+
+        preSaleTokensSold += tokensToBuy;
+        token.transfer(msg.sender, tokensToBuy);
+        emit TokensPurchased(msg.sender, tokensToBuy);
+    }
+
+    function endPreSale() external onlyOwner {
+        preSaleActive = false;
+    }
+
+    function addLiquidity() external onlyOwner {
+        uint256 tokenAmount = token.balanceOf(address(this));
+        uint256 ethAmount = address(this).balance;
+
+        token.approve(address(pancakeRouter), tokenAmount);
+        pancakeRouter.addLiquidityETH{value: ethAmount}(
+            address(token),
+            tokenAmount,
+            0,
+            0,
+            owner,
+            block.timestamp
+        );
+    }
+
+    function retrieveTokens(uint256 amount) external onlyOwner {
+        token.transfer(owner, amount);
+    }
+
+    function retrieveEth() external onlyOwner {
+        (bool success, ) = owner.call{value: address(this).balance}("");
+        require(success, "Failed to retrieve ETH");
+}
